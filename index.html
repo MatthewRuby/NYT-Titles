@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>NYT Articles</title>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+	<link rel="SHORTCUT ICON" href="http://www.matt-ruby.com/congress/favicon.ico"/>
+	<link href="style.css" rel="stylesheet" type="text/css" />
+
+	<script type = "text/javascript" src = "ajax.js"></script>
+	<script type = "text/javascript" src = "utils.js"></script>
+	<script type = "text/javascript" src = "block.js"></script>
+	<script type="text/javascript">
+
+		var loading;
+		var canvas;
+		var g;
+		var mX;
+		var mY;
+		var mP;
+
+		var article = [];
+		var words = [];
+		var block = [];
+		var views = [];
+
+		var max_views = 0;
+		var min_views = 1000000000;
+
+		var rel_lookup = [];
+		var bSelected = false;
+
+	function query(){
+		ajax("articles.php", null, returnArticles);
+	}
+
+	function returnArticles(m){
+		var xml = m;
+		if(typeof m == 'string') {
+			xml = stringToXml(m);
+		}
+
+		var items = xml.getElementsByTagName('result');
+
+		console.log(items)
+
+		for(var i = 0; i < items.length; i++) {
+			var item = items[i];
+
+			words[i] = {};
+			try {
+				console.log( i + " - " + item.getElementsByTagName("word")[0].childNodes[0].nodeValue )
+				words[i].word = item.getElementsByTagName("word")[0].childNodes[0].nodeValue;
+				words[i].occur = item.getElementsByTagName("num_occur")[0].childNodes[0].nodeValue;
+				words[i].views = item.getElementsByTagName("views")[0].childNodes[0].nodeValue;
+				views[i] = item.getElementsByTagName("views")[0].childNodes[0].nodeValue;
+			} catch(err) {
+		  //Handle errors here
+		  }
+
+			var b = item.getElementsByTagName("before");
+			var before = [];
+			var indexB = 0;
+			for(var j = 0; j < b.length; j++){
+				if(b[j].childNodes[0] != undefined){
+					before[indexB] = b[j].childNodes[0].nodeValue;
+					indexB++;
+				}
+
+			}
+			words[i].before = before;
+
+			var a = item.getElementsByTagName("after");
+
+			var after = [];
+			var indexA = 0;
+			for(var j = 0; j < a.length; j++){
+				if(a[j].childNodes[0] != undefined){
+					after[indexA] = a[j].childNodes[0].nodeValue;
+					indexA++;
+				}
+
+			}
+			words[i].after = after;
+
+		}
+
+		views.sort(sortNumber);
+		max_views = views[views.length - 1];
+		min_views = views[0];
+
+		setup();
+
+	};
+
+	//--------------------------------------------------
+			window.onload = function() {
+
+				loading = document.createElement('img');
+				loading.setAttribute('src', 'loading.gif');
+				loading.setAttribute('alt', '');
+				document.body.appendChild(loading);
+
+				query();
+
+				canvas = document.createElement('canvas');
+				canvas.setAttribute('width', window.innerWidth - 12);
+				canvas.setAttribute('height', window.innerHeight - 12);
+				g = canvas.getContext('2d');
+
+			};
+
+	//--------------------------------------------------
+			function setup() {
+
+				document.body.removeChild(loading);
+				document.body.appendChild(canvas);
+
+				canvas.addEventListener('mousemove', mousemoved, false);
+				canvas.addEventListener('mousedown', mousePressed, false);
+				canvas.addEventListener('mouseup', mouseReleased, false);
+				canvas.addEventListener('mouseup', mouseReleased, false);
+				canvas.addEventListener('dblclick', mouseDoubleClick, false);
+
+
+				for(var i = 0; i < words.length; i++){
+					block[i] = new Block(g, Math.random()*canvas.width, Math.random()*canvas.height, words[i].word, words[i].before, words[i].after, words[i].views);
+					block[i].last_active = 6;
+				}
+
+
+				for(var i = 0; i < block.length; i++){
+					var before_len = block[i].before.length;
+					var after_len = block[i].after.length;
+
+					rel_lookup[i] = new Object;
+					rel_lookup[i].before = [];
+					rel_lookup[i].after = [];
+
+					for(var j = 0; j < before_len; j++){
+						for(var k = 0; k < block.length; k++){
+							if(block[i].before[j] == block[k].word){
+								rel_lookup[i].before[j] = k;
+							}
+						}
+					}
+
+					for(var j = 0; j < after_len; j++){
+						for(var k = 0; k < block.length; k++){
+							if(block[i].after[j] == block[k].word){
+								rel_lookup[i].after[j] = k;
+							}
+						}
+					}
+				}
+
+				setInterval(update, 1000/30);
+				setInterval(draw, 1000/30);
+			};
+
+			var over_index = -1;
+			var prev_over = -1;
+	//--------------------------------------------------
+			function update() {
+
+				for(var i = 0; i < words.length; i++){
+					block[i].mouseOver(mX, mY, mP);
+					if(block[i].bOver == true && bSelected == false){
+						over_index = i;
+						block[i].bActive = true;
+						block[i].last_active = 0;
+						bSelected = true;
+					}
+				}
+
+
+				if(over_index >= 0){
+
+					var b_len = rel_lookup[over_index].before.length;
+					var a_len = rel_lookup[over_index].after.length;
+
+					if(b_len > 1 || a_len > 1){
+						var h = Math.max(b_len, a_len);
+						block[over_index].setHeight(h);
+					}
+
+
+					for(var i = 0; i < b_len; i++){
+
+						var num = rel_lookup[over_index].before[i];
+
+						var offset = block[over_index].size.x/2 + block[num].size.x/2 + 6;
+						var v_offset = block[over_index].pos.y;
+						if(b_len > 1){
+							v_offset = (block[over_index].pos.y - (block[over_index].size.y/2)) + (24 * i);
+						}
+
+						block[num].setPos(block[over_index].pos.x - offset, v_offset);
+						block[num].bActive = true;
+						block[num].last_active = 1;
+
+					}
+
+					for(var i = 0; i < a_len; i++){
+
+						var num = rel_lookup[over_index].after[i];
+
+						var offset = block[over_index].size.x/2 + block[num].size.x/2 + 6;
+						var v_offset = block[over_index].pos.y;
+						if(a_len > 1){
+							v_offset = (block[over_index].pos.y - (block[over_index].size.y/2)) + (24 * i);
+						}
+
+						block[num].setPos(block[over_index].pos.x + offset, v_offset);
+						block[num].bActive = true;
+						block[num].last_active = 1;
+
+					}
+
+					for(var i = 0; i < words.length; i++){
+
+						if(i != over_index){
+							block[i].setHeight(1);
+
+							if(block[i].bActive == false && block[i].last_active > 6 &&
+								Math.abs(block[i].pos.x - block[over_index].pos.x) < 200 &&
+								Math.abs(block[i].pos.y - block[over_index].pos.y) < 200){
+
+									var diff = new Point(block[i].pos.x - block[over_index].pos.x, block[i].pos.y - block[over_index].pos.y);
+									block[i].setPos(block[i].pos.x + (200/diff.x), block[i].pos.y + (200/diff.y));
+
+							}
+
+						}
+
+						if(prev_over != over_index){
+							block[i].last_active++;
+						}
+
+					}
+
+				}
+
+				for(var i = 0; i < words.length; i++){
+					block[i].update();
+					block[i].bActive = false;
+				}
+
+				prev_over = over_index;
+
+			};
+
+			var scale = new Point(1.0, 1.0);
+	//--------------------------------------------------
+			function draw() {
+				g.clearRect(0,0,canvas.width, canvas.height);
+
+				// create a new array with the words and sort it so that the most active are on top.
+/*
+				var last_viewed = [];
+				for(var i = 0; i < words.length; i++){
+					last_viewed[i] = block[i].last_active;
+				}
+
+				var drawArray = [];
+				for(var i = 0; i < words.length; i++){
+					if(last_viewed[i] == i){
+						drawArray[]
+					}
+				}
+
+*/
+
+				g.save();
+				g.scale(scale.x, scale.y);
+				for(var i = 0; i < words.length; i++){
+					block[i].draw();
+				}
+				g.restore();
+
+			};
+
+	//----------- Mouse Functions ----------------------
+			function mousemoved(e) {
+				mX = e.offsetX / scale.x;
+				mY = e.offsetY / scale.y;
+
+				bSelected = false;
+			};
+	//--------------------------------------------------
+			function mousePressed() {
+				mP = true;
+			};
+	//--------------------------------------------------
+			function mouseReleased() {
+				mP = false;
+			};
+	//--------------------------------------------------
+			function mouseDoubleClick() {
+				// scale.x += 0.1;
+				// scale.y += 0.1;
+				console.log("double");
+			}
+
+
+
+</script>
+</head>
+<body>
+</body>
+</html>
